@@ -176,7 +176,26 @@ app.MapPost("/tuberorders/{id}/complete", (int Id) =>
 
 app.MapGet("/tuberorders/{id}", (int Id) =>
 {
+    //locates order by passed in Id matching it by iterating throught all tuberorders
     TuberOrder tuberOrder = tuberOrders.FirstOrDefault(to => to.Id == Id);
+
+    //finds the driver for each order by iterating through drivers until the id of the driver mathces the tuberdriverId
+    TuberDriver driverForOrder = drivers.FirstOrDefault(d => d.Id == tuberOrder.TuberDriverId);
+
+    //filters list of tuberToppings to find just the objects where the tubertopping order id matches the orderId 
+    //e.g.  { Id = 1, TuberOrderId = 1, ToppingId = 1 }, { Id = 2, TuberOrderId = 1, ToppingId = 3 }
+    List<TuberTopping> toppingsForEachOrder = tuberToppings.Where(tt => tt.TuberOrderId == tuberOrder.Id).ToList();
+
+    // Retrieve the names of toppings for each order by iterating through the filtered list of toppings for each order objects
+    //e.g.  { Id = 1, TuberOrderId = 1, ToppingId = 1 }, { Id = 2, TuberOrderId = 1, ToppingId = 3 }
+    List<ToppingDTO> toppingNamesForEachOrder = toppingsForEachOrder.Select(t => new ToppingDTO
+    {
+        Id = t.ToppingId,
+    //the first time the Ids match grab the Name from the object
+        Name = toppings.FirstOrDefault(topping => topping.Id == t.ToppingId)?.Name 
+    }).ToList();
+
+
 
     return new TuberOrderDTO
     {
@@ -185,13 +204,15 @@ app.MapGet("/tuberorders/{id}", (int Id) =>
         CustomerId = tuberOrder.CustomerId,
         TuberDriverId = tuberOrder.TuberDriverId,
         DeliveredOnDate = tuberOrder.DeliveredOnDate,
-        //   Toppings = toppings.Select(t => new ToppingDTO
-        // {
-        //     Id = t.Id,
-        //     Name = t.Name
-        // }).ToList()
+        Toppings = toppingNamesForEachOrder,
+        Driver = driverForOrder != null ? new TuberDriverDTO
+        {
+            Id = driverForOrder.Id,
+            Name = driverForOrder.Name
+        } : null
     };
 });
+
 
 //---------------------------------------------
 
@@ -246,13 +267,14 @@ app.MapPost("/tubertoppings/", (TuberTopping newTuberTopping) =>
         TuberOrderId = newTuberTopping.TuberOrderId,
         ToppingId = newTuberTopping.ToppingId
     });
-
+//!!!!! copy and paste topping object but only send the orderId and the toppingId
 });
 //when this code block ^^^ is executed as a response to a successful creation request (POST to /tubertoppings/),
 // it will return a 201 Created response with a location header indicating where the newly created resource can
 // be found, and it will also include the details of the newly created TuberTopping in the response body as a TuberToppingDTO.
 //---------------------------------------------
 
+//delete a tuber topping by id and then check tuber orders if it's gone
 app.MapDelete("/tubertoppings/{id}", (int id) =>
 {
     TuberTopping tuberToppingToDelete = tuberToppings.FirstOrDefault(tt => tt.Id == id);
@@ -287,7 +309,6 @@ app.MapGet("/customers/{id}", (int id) =>
     // Find the customer object with the given id
     Customer customer = customers.FirstOrDefault(c => c.Id == id);
 
-
     // Filter tuber order list so that it only contains orders for this specific customer
     List<TuberOrder> customerOrders = tuberOrders.Where(to => to.CustomerId == id).ToList();
 
@@ -299,7 +320,29 @@ app.MapGet("/customers/{id}", (int id) =>
         // Find toppings for each customer order
         List<TuberTopping> toppingsForEachOrder = tuberToppings.Where(tt => tt.TuberOrderId == co.Id).ToList();
 
-      
+        // Create a list to store ToppingDTO objects for the current order
+        List<ToppingDTO> orderToppings = new List<ToppingDTO>();
+
+        foreach (TuberTopping tt in toppingsForEachOrder)
+        {
+            // Find the corresponding Topping for each TuberTopping
+            Topping matchingTopping = toppings.FirstOrDefault(t => t.Id == tt.ToppingId);
+
+            if (matchingTopping != null)
+            {
+                // Create a ToppingDTO object with the matching topping name
+                ToppingDTO toppingDTO = new ToppingDTO
+                {
+                    Id = matchingTopping.Id,
+                    Name = matchingTopping.Name,
+                    // Add other properties of ToppingDTO as needed
+                };
+
+                orderToppings.Add(toppingDTO);
+            }
+        }
+
+        TuberDriver driverForOrder = drivers.FirstOrDefault(d => d.Id == co.TuberDriverId);
 
         // Create TuberOrderDTO for the customer order with associated toppings
         TuberOrderDTO orderDTO = new TuberOrderDTO
@@ -309,12 +352,12 @@ app.MapGet("/customers/{id}", (int id) =>
             CustomerId = co.CustomerId,
             TuberDriverId = co.TuberDriverId,
             DeliveredOnDate = co.DeliveredOnDate,
-            Toppings = toppingsForEachOrder.Select(t => new ToppingDTO
+            Toppings = orderToppings, // Assign the list of ToppingDTO objects to the Toppings property
+            Driver = driverForOrder != null ? new TuberDriverDTO
             {
-                Id = t.Id,
-                
-                // Add other properties of ToppingDTO as needed
-            }).ToList()
+                Id = driverForOrder.Id,
+                Name = driverForOrder.Name
+            } : null
         };
 
         ordersForThisCustomer.Add(orderDTO);
@@ -330,6 +373,7 @@ app.MapGet("/customers/{id}", (int id) =>
     };
 });
 
+
 app.MapDelete("/customers/{id}", (int id) =>
 {
     Customer customerToDelete = customers.FirstOrDefault(c => c.Id == id);
@@ -342,27 +386,25 @@ app.MapDelete("/customers/{id}", (int id) =>
     return Results.NoContent();
 });
 
-// app.MapPost("/customers", (Customer newCustomer) => 
-// {
-//     //creating the new Id
-//     newCustomer.Id = customers.Max(c => c.Id) + 1;
+app.MapPost("/customers", (Customer newCustomer) =>
+{
+    //create new Id
+    newCustomer.Id = customers.Max(tt => tt.Id) + 1;
 
-//     customers.Add(newCustomer);
+    customers.Add(newCustomer);
 
-//       return Results.Created($"/customers/{newCustomer.Id}", new CustomerDTO 
-//     {
-//         Id = newCustomer.Id,
-//         Name = newCustomer.Name,
-//         Address = newCustomer.Address,
-//         TuberOrders = newCustomer.TuberOrders.Select(customer => new TuberToppingDTO)
-//         { 
-//             Id = null
-//         }
-//     });
+    return Results.Created($"/customers/{newCustomer.Id}", new CustomerDTO
+    {
+        Id = newCustomer.Id,
+        Name = newCustomer.Name,
+        Address = newCustomer.Address
+    });
 
 
-// });
-//---------------------------------------------
+});
+
+
+
 app.MapGet("/tuberdrivers", () =>
 {
     //for each customer object given the name c return a CustomerDTO object 
@@ -409,7 +451,7 @@ app.MapGet("/tuberdrivers/{id}", (int id) =>
 });
 
 
-//  public List<TuberOrderDTO> TuberDeliveries { get; set;}
+
 
 
 
